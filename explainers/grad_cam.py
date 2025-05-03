@@ -1,54 +1,118 @@
-import numpy as np
 import torch
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image, preprocess_image
-import logging
+import torch.nn.functional as F
+import cv2
+import numpy as np
 import os
+import logging
+from torch import nn
 from utils.visualize import save_heatmap_overlay
+from datetime import datetime
 
-
-def run_grad_cam(model, target_layer, input_image, rgb_image, use_cuda=True):
-    """
-    运行Grad-CAM解释器
-    """
-    try:
-        model.eval()
-        device = torch.device("cuda" if (torch.cuda.is_available() and use_cuda) else "cpu")
-        model.to(device)
+class GradCAM:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients = None
+        self.activations = None
         
-        logging.info(f"Running Grad-CAM on device: {device}")
+        # 注册hook
+        target_layer.register_forward_hook(self.save_activation)
+        target_layer.register_backward_hook(self.save_gradient)
         
-        # 确保输入图像是numpy数组
-        if isinstance(rgb_image, torch.Tensor):
-            rgb_image = rgb_image.cpu().numpy()
-        if rgb_image.dtype != np.uint8:
-            rgb_image = (rgb_image * 255).astype(np.uint8)
+        # 确保模型在评估模式
+        self.model.eval()
         
-        # 预处理图像
-        input_tensor = preprocess_image(rgb_image).to(device)
-        logging.info(f"Input tensor shape: {input_tensor.shape}")
+        # 确保模型可以计算梯度
+        for param in self.model.parameters():
+            param.requires_grad = True
+    
+    def save_activation(self, module, input, output):
+        self.activations = output.detach()
+        if self.activations.requires_grad:
+            self.activations.requires_grad_(False)
+    
+    def save_gradient(self, module, grad_input, grad_output):
+        self.gradients = grad_output[0].detach()
+        if self.gradients.requires_grad:
+            self.gradients.requires_grad_(False)
+    
+    def generate_cam(self, input_tensor, target_class):
+        # 前向传播
+        output = self.model(input_tensor)
         
-        # 创建Grad-CAM解释器
-        cam = GradCAM(model=model, target_layers=[target_layer])
-        logging.info("Grad-CAM explainer created")
+        # 如果目标类别为None，使用模型预测的类别
+        if target_class is None:
+            target_class = output.argmax(dim=1).item()
+            
+        # 创建目标类别的one-hot向量
+        one_hot = torch.zeros_like(output)
+        one_hot[0][target_class] = 1
         
-        # 生成热力图
-        grayscale_cam = cam(input_tensor=input_tensor)[0]
-        logging.info(f"Grad-CAM heatmap generated, shape: {grayscale_cam.shape}")
+        # 反向传播
+        self.model.zero_grad()
+        output.backward(gradient=one_hot, retain_graph=True)
         
-        # 可视化结果
-        visualization = show_cam_on_image(rgb_image / 255.0, grayscale_cam, use_rgb=True)
-        logging.info("Grad-CAM visualization created")
+        # 获取梯度和激活
+        gradients = self.gradients
+        activations = self.activations
         
-        # 保存热力图叠加
-        output_dir = os.path.join("output", "visualizations", "grad_cam")
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, "grad_cam_heatmap.png")
-        save_heatmap_overlay(rgb_image, grayscale_cam, save_path)
-        logging.info(f"Grad-CAM heatmap saved to: {save_path}")
+        # 计算权重（改进的权重计算）
+        weights = torch.mean(gradients, dim=(2, 3), keepdim=True)
+        weights = F.relu(weights)  # 只保留正梯度
+        weights = weights / (weights.sum() + 1e-8)  # 归一化权重
         
-        return visualization
+        # 计算CAM
+        cam = torch.sum(weights * activations, dim=1, keepdim=True)
+        cam = F.relu(cam)  # 应用ReLU
         
-    except Exception as e:
-        logging.error(f"Error in Grad-CAM: {str(e)}")
-        raise
+        # Grad-CAM特定的归一化
+        cam = cam / (cam.max() + 1e-8)
+        
+        return cam.squeeze().cpu().numpy()
+    
+    def explain(self, image, image_id, category, model_name, target_class=None):
+        try:
+            # 确保输入是tensor
+            if not isinstance(image, torch.Tensor):
+                image = torch.from_numpy(image).float()
+            
+            # 添加batch维度
+            if image.dim() == 3:
+                image = image.unsqueeze(0)
+            
+            # 移动到GPU（如果可用）
+            if torch.cuda.is_available():
+                image = image.cuda()
+                if not next(self.model.parameters()).is_cuda:
+                    self.model = self.model.cuda()
+            
+            # 生成CAM
+            cam = self.generate_cam(image, target_class)
+            
+            # 调整大小到原始图像尺寸
+            cam = cv2.resize(cam, (image.shape[3], image.shape[2]))
+            
+            # 保存热力图
+            save_dir = os.path.join("output/comparison_results", "train" if "train" in image_id else "test")
+            os.makedirs(save_dir, exist_ok=True)
+            
+            # 构建唯一的文件名
+            save_path = os.path.join(save_dir, f"{image_id}_{category}_{model_name}_Grad-CAM.png")
+            
+            # 保存原始热力图数据
+            np.save(save_path.replace('.png', '.npy'), cam)
+            
+            # 准备原始图像用于可视化
+            original_image = image.squeeze(0).cpu().numpy()
+            if original_image.shape[0] == 3:  # 如果是CHW格式
+                original_image = np.transpose(original_image, (1, 2, 0))
+            
+            # 保存可视化热力图
+            save_heatmap_overlay(original_image, cam, save_path, save_original=True)
+            
+            logging.info(f"Saved Grad-CAM heatmap to {save_path}")
+            return cam
+            
+        except Exception as e:
+            logging.error(f"Error in Grad-CAM explanation: {str(e)}")
+            raise

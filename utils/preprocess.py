@@ -34,33 +34,62 @@ def preprocess_for_cam(image_pil):
         raise
 
 # 供 LIME 使用（接收 np.array 图像，输出 Tensor）
-def preprocess_for_lime(image_pil):
-    """
-    为LIME方法预处理图像
-    """
-    try:
-        # 记录原始图像信息
-        logging.info(f"Original image size: {image_pil.size}")
-        logging.info(f"Original image mode: {image_pil.mode}")
-        
-        # 定义预处理步骤
-        preprocess = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        
-        # 应用预处理
-        input_tensor = preprocess(image_pil)
-        
-        # 记录预处理后的信息
-        logging.info(f"Preprocessed tensor shape: {input_tensor.shape}")
-        logging.info(f"Preprocessed tensor range: [{input_tensor.min():.3f}, {input_tensor.max():.3f}]")
-        
-        return input_tensor
-    except Exception as e:
-        logging.error(f"Error in preprocess_for_lime: {str(e)}")
-        raise
+# def preprocess_for_lime(image_pil):
+#     """
+#     为LIME方法预处理图像
+#     """
+#     try:
+#         # 记录原始图像信息
+#         logging.info(f"Original image size: {image_pil.size}")
+#         logging.info(f"Original image mode: {image_pil.mode}")
+#         
+#         # 定义预处理步骤
+#         preprocess = transforms.Compose([
+#             transforms.Resize((224, 224)),
+#             transforms.ToTensor(),
+#             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+#         ])
+#         
+#         # 应用预处理
+#         input_tensor = preprocess(image_pil)
+#         
+#         # 记录预处理后的信息
+#         logging.info(f"Preprocessed tensor shape: {input_tensor.shape}")
+#         logging.info(f"Preprocessed tensor range: [{input_tensor.min():.3f}, {input_tensor.max():.3f}]")
+#         
+#         return input_tensor
+#     except Exception as e:
+#         logging.error(f"Error in preprocess_for_lime: {str(e)}")
+#         raise
+
+# 供 SHAP 使用（接收 np.array 图像，输出 Tensor）
+# def preprocess_for_shap(image_pil):
+#     """
+#     为SHAP方法预处理图像
+#     """
+#     try:
+#         # 记录原始图像信息
+#         logging.info(f"Original image size: {image_pil.size}")
+#         logging.info(f"Original image mode: {image_pil.mode}")
+#         
+#         # 定义预处理步骤
+#         preprocess = transforms.Compose([
+#             transforms.Resize((224, 224)),
+#             transforms.ToTensor(),
+#             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+#         ])
+#         
+#         # 应用预处理
+#         input_tensor = preprocess(image_pil)
+#         
+#         # 记录预处理后的信息
+#         logging.info(f"Preprocessed tensor shape: {input_tensor.shape}")
+#         logging.info(f"Preprocessed tensor range: [{input_tensor.min():.3f}, {input_tensor.max():.3f}]")
+#         
+#         return input_tensor
+#     except Exception as e:
+#         logging.error(f"Error in preprocess_for_shap: {str(e)}")
+#         raise
 
 def preprocess_for_model_comparison(image_pil):
     """
