@@ -10,7 +10,7 @@ import pandas as pd
 from tabulate import tabulate
 
 # 瀵煎叆棰勫鐞嗗嚱鏁�
-from utils.preprocess import preprocess_for_cam, preprocess_for_lime, preprocess_for_shap
+from utils.preprocess import preprocess_for_cam, preprocess_for_lime
 from utils.helpers import create_output_directories, setup_logging, get_device_info
 from utils.visualize import plot_comparison
 
@@ -19,7 +19,6 @@ from explainers.grad_cam import run_grad_cam
 from explainers.score_cam import run_score_cam
 from explainers.layer_cam import run_layer_cam
 from explainers.lime_explainer import lime_explanation
-from explainers.shap_explainer import shap_explanation
 
 # 瀵煎叆妯″瀷鍔犺浇鍣�
 from models.resnet50 import get_resnet50
@@ -96,15 +95,13 @@ def process_image_with_explainer(model, target_layer, image_pil, method_name, pr
         rgb_image = np.array(image_pil)
         
         if method_name == "Grad-CAM":
-            visualization = run_grad_cam(model, target_layer, None, rgb_image)
+            visualization = run_grad_cam(model, target_layer, image_pil, rgb_image)
         elif method_name == "Score-CAM":
-            visualization = run_score_cam(model, target_layer, None, rgb_image)
+            visualization = run_score_cam(model, target_layer, image_pil, rgb_image)
         elif method_name == "Layer-CAM":
-            visualization = run_layer_cam(model, target_layer, None, rgb_image)
+            visualization = run_layer_cam(model, target_layer, image_pil, rgb_image)
         elif method_name == "LIME":
-            visualization = lime_explanation(model, image_pil, preprocess_func)
-        elif method_name == "SHAP":
-            visualization = shap_explanation(model, image_pil, preprocess_func)
+            visualization = lime_explanation(model, image_pil, rgb_image)
         else:
             raise ValueError(f"Unknown explanation method: {method_name}")
         
@@ -128,65 +125,110 @@ def load_labels(labels_path):
         return None
 
 def get_image_paths(train_dir, test_dir):
-    """
-    获取训练集和测试集的图片路径
-    """
+    """获取训练集和测试集的图片路径，每类采样相同数量"""
     train_images = []
     test_images = []
     
+    # 每类采样数量
+    samples_per_class_train = 80  # 训练集每类80张，共800张
+    samples_per_class_test = 20   # 测试集每类20张，共200张
+    
     # 获取训练集图片
-    for root, _, files in os.walk(train_dir):
-        for file in files:
-            if file.endswith('.png'):
-                train_images.append(os.path.join(root, file))
+    for class_dir in os.listdir(train_dir):
+        class_path = os.path.join(train_dir, class_dir)
+        if os.path.isdir(class_path):
+            images = [os.path.join(class_path, f) for f in os.listdir(class_path) if f.endswith('.png')]
+            # 随机采样
+            sampled_images = np.random.choice(images, min(samples_per_class_train, len(images)), replace=False)
+            train_images.extend(sampled_images)
     
     # 获取测试集图片
-    for root, _, files in os.walk(test_dir):
-        for file in files:
-            if file.endswith('.png'):
-                test_images.append(os.path.join(root, file))
+    for class_dir in os.listdir(test_dir):
+        class_path = os.path.join(test_dir, class_dir)
+        if os.path.isdir(class_path):
+            images = [os.path.join(class_path, f) for f in os.listdir(class_path) if f.endswith('.png')]
+            # 随机采样
+            sampled_images = np.random.choice(images, min(samples_per_class_test, len(images)), replace=False)
+            test_images.extend(sampled_images)
     
-    logging.info(f"Found {len(train_images)} training images and {len(test_images)} test images")
+    logging.info(f"Sampled {len(train_images)} training images and {len(test_images)} test images")
     return train_images, test_images
 
-def compare_models(models_to_compare, image_pil):
-    """
-    比较不同模型对同一张图片的预测结果
-    """
+def compare_models(image_paths, models, explainers, output_dir, batch_size=50):
+    """批量比较不同模型在相同图片上的解释结果"""
     results = []
+    total_images = len(image_paths)
+    processed_images = 0
     
-    for model_name in models_to_compare:
-        try:
-            # 加载模型
-            model, target_layer = load_model(model_name)
-            model.eval()
-            
-            # 预处理图像
-            input_tensor = preprocess_for_cam(image_pil).unsqueeze(0).to(device)
-            
-            # 获取预测结果
-            with torch.no_grad():
-                outputs = model(input_tensor)
-                probabilities = torch.nn.functional.softmax(outputs, dim=1)
-                top_prob, top_class = torch.max(probabilities, 1)
+    # 创建输出目录
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 分批处理图片
+    for i in range(0, total_images, batch_size):
+        batch_paths = image_paths[i:i+batch_size]
+        logging.info(f"Processing batch {i//batch_size + 1}/{(total_images-1)//batch_size + 1} ({len(batch_paths)} images)")
+        
+        for image_path in batch_paths:
+            try:
+                # 加载图片
+                image = Image.open(image_path).convert('RGB')
+                image_name = os.path.basename(image_path)
                 
-            # 记录结果
-            results.append({
-                'model': model_name,
-                'predicted_class': top_class.item(),
-                'confidence': top_prob.item(),
-                'all_probabilities': probabilities.cpu().numpy()[0]
-            })
+                # 为每个模型生成解释
+                model_results = {}
+                for model_name, model in models.items():
+                    model_results[model_name] = {}
+                    
+                    # 使用不同的解释器
+                    for explainer_name, explainer in explainers.items():
+                        try:
+                            # 生成解释
+                            explanation = process_image_with_explainer(
+                                image, 
+                                model, 
+                                explainer_name, 
+                                explainer
+                            )
+                            
+                            if explanation:
+                                # 保存可视化结果
+                                save_path = os.path.join(
+                                    output_dir,
+                                    f"{os.path.splitext(image_name)[0]}_{model_name}_{explainer_name}.png"
+                                )
+                                save_heatmap_overlay(
+                                    image,
+                                    explanation['heatmap'],
+                                    save_path
+                                )
+                                
+                                # 记录结果
+                                model_results[model_name][explainer_name] = {
+                                    'prediction': explanation['prediction'],
+                                    'confidence': explanation['confidence'],
+                                    'top_classes': explanation['top_classes']
+                                }
+                                
+                        except Exception as e:
+                            logging.error(f"Error processing {image_name} with {model_name} and {explainer_name}: {str(e)}")
+                            continue
+                
+                # 记录所有模型的结果
+                results.append({
+                    'image': image_name,
+                    'results': model_results
+                })
+                
+            except Exception as e:
+                logging.error(f"Error processing {image_path}: {str(e)}")
+                continue
             
-            logging.info(f"{model_name} prediction completed")
-            
-        except Exception as e:
-            logging.error(f"Error in {model_name} prediction: {str(e)}")
-            results.append({
-                'model': model_name,
-                'error': str(e)
-            })
+            processed_images += 1
+            if processed_images % 10 == 0:
+                logging.info(f"Processed {processed_images}/{total_images} images")
     
+    # 保存比较结果
+    save_comparison_report(results, os.path.join(output_dir, 'comparison_report.txt'))
     return results
 
 def generate_comparison_report(results, filename):
@@ -264,10 +306,6 @@ def compare_explainers(model, image_path, target_layer, use_cuda=True):
         lime_result = lime_explanation(model, image, rgb_image, use_cuda)
         results['LIME'] = lime_result
         
-        # SHAP
-        shap_result = shap_explanation(model, image, rgb_image, use_cuda)
-        results['SHAP'] = shap_result
-        
         # 生成比较报告
         generate_comparison_report(results, image_path)
         
@@ -304,145 +342,56 @@ def plot_comparison_results(results, image_path):
         raise
 
 def main():
-    # 设置路径
-    train_dir = r"E:\machinelearning\datacollection\CIFAR-10-100(含png图)\cifar_png\cifar\train"
-    test_dir = r"E:\machinelearning\datacollection\CIFAR-10-100(含png图)\cifar_png\cifar\test"
-    labels_path = r"E:\machinelearning\datacollection\CIFAR-10-100(含png图)\cifar_png\cifar\labels.txt"
-    
-    # 创建输出目录
-    create_output_directories()
-    
     # 设置日志
-    log_file = setup_logging()
-    logging.info(f"Log file created at: {log_file}")
+    setup_logging()
     
-    # 获取设备信息
-    device_info = get_device_info()
+    # 设置随机种子以确保可重复性
+    np.random.seed(42)
+    torch.manual_seed(42)
     
-    # 加载标签
-    labels = load_labels(labels_path)
-    if not labels:
-        logging.error("Failed to load labels, exiting...")
-        return
+    # 获取图片路径（采样1000张）
+    train_images, test_images = get_image_paths("data/train", "data/test")
     
-    # 获取图片路径
-    train_images, test_images = get_image_paths(train_dir, test_dir)
-    
-    # 设置模型和图片路径
-    models_to_compare = ["ResNet50", "VGG16", "EfficientNet", "DenseNet", "MobileNet"]
-    
-    # 统计信息
-    stats = {
-        "total_images": len(train_images) + len(test_images),
-        "processed_images": 0,
-        "successful_explanations": {method: 0 for method in ["Grad-CAM", "Score-CAM", "Layer-CAM", "LIME", "SHAP"]},
-        "failed_explanations": {method: 0 for method in ["Grad-CAM", "Score-CAM", "Layer-CAM", "LIME", "SHAP"]},
-        "model_comparisons": 0
+    # 加载模型
+    models_to_compare = {
+        "ResNet50": load_model("ResNet50"),
+        "MobileNet": load_model("MobileNet")
     }
     
-    # 处理训练集和测试集
-    for image_set, image_paths in [("train", train_images), ("test", test_images)]:
-        logging.info(f"\nProcessing {image_set} set...")
-        
-        for idx, image_path in enumerate(image_paths, 1):
-            try:
-                image_pil = Image.open(image_path).convert("RGB")
-                filename = os.path.basename(image_path)
-                
-                logging.info(f"\nProcessing {image_set} image {idx}/{len(image_paths)}: {filename}")
-                
-                # 模型比较
-                logging.info("Running model comparison...")
-                comparison_results = compare_models(models_to_compare, image_pil)
-                comparison_report = generate_comparison_report(comparison_results, filename)
-                logging.info(comparison_report)
-                
-                # 保存比较报告
-                report_dir = os.path.join("output", "comparison_reports", image_set)
-                os.makedirs(report_dir, exist_ok=True)
-                with open(os.path.join(report_dir, f"{filename}_comparison.txt"), "w") as f:
-                    f.write(comparison_report)
-                
-                stats["model_comparisons"] += 1
-                
-                # 对每种解释方法进行处理
-                for method_name in ["Grad-CAM", "Score-CAM", "Layer-CAM", "LIME", "SHAP"]:
-                    preprocess_func = {
-                        "Grad-CAM": preprocess_for_cam,
-                        "Score-CAM": preprocess_for_cam,
-                        "Layer-CAM": preprocess_for_cam,
-                        "LIME": preprocess_for_lime,
-                        "SHAP": preprocess_for_shap
-                    }[method_name]
-                    
-                    # 对每个模型运行解释器
-                    for model_name in models_to_compare:
-                        try:
-                            model, target_layer = load_model(model_name)
-                            model.eval()
-                            
-                            logging.info(f"Running {method_name} with {model_name}...")
-                            visualization, success = process_image_with_explainer(
-                                model, target_layer, image_pil, method_name, preprocess_func
-                            )
-                            
-                            if success and visualization is not None:
-                                # 保存可视化结果
-                                output_dir = os.path.join("output", "visualizations", method_name, model_name, image_set)
-                                os.makedirs(output_dir, exist_ok=True)
-                                save_path = os.path.join(output_dir, f"{filename}_{method_name.lower()}.png")
-                                plt.imsave(save_path, visualization)
-                                logging.info(f"Saved {method_name} visualization to: {save_path}")
-                                
-                                stats["successful_explanations"][method_name] += 1
-                            else:
-                                stats["failed_explanations"][method_name] += 1
-                                
-                        except Exception as e:
-                            logging.error(f"Error processing {method_name} with {model_name}: {str(e)}")
-                            stats["failed_explanations"][method_name] += 1
-                
-                stats["processed_images"] += 1
-                
-            except Exception as e:
-                logging.error(f"Error processing {filename}: {str(e)}")
-                continue
+    # 处理训练集图片
+    logging.info("Processing training images...")
+    train_results = compare_models(
+        train_images,
+        models_to_compare,
+        {
+            "Grad-CAM": process_image_with_explainer,
+            "Score-CAM": process_image_with_explainer,
+            "Layer-CAM": process_image_with_explainer,
+            "LIME": process_image_with_explainer
+        },
+        os.path.join("output", "comparison_results", "train"),
+        batch_size=50
+    )
     
-    # 输出最终统计信息
-    logging.info("\nFinal Statistics:")
-    logging.info(f"Total images processed: {stats['total_images']}")
-    logging.info(f"Successfully processed images: {stats['processed_images']}")
-    logging.info(f"Model comparisons performed: {stats['model_comparisons']}")
+    # 处理测试集图片
+    logging.info("Processing test images...")
+    test_results = compare_models(
+        test_images,
+        models_to_compare,
+        {
+            "Grad-CAM": process_image_with_explainer,
+            "Score-CAM": process_image_with_explainer,
+            "Layer-CAM": process_image_with_explainer,
+            "LIME": process_image_with_explainer
+        },
+        os.path.join("output", "comparison_results", "test"),
+        batch_size=50
+    )
     
-    logging.info("\nExplanation Method Statistics:")
-    for method in ["Grad-CAM", "Score-CAM", "Layer-CAM", "LIME", "SHAP"]:
-        logging.info(f"{method}:")
-        logging.info(f"  Successful: {stats['successful_explanations'][method]}")
-        logging.info(f"  Failed: {stats['failed_explanations'][method]}")
+    # 生成最终报告
+    generate_final_report(train_results, test_results)
     
-    # 生成并保存最终报告
-    final_report = f"""
-Final Report
-============
-Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-Total Images: {stats['total_images']}
-Processed Images: {stats['processed_images']}
-Model Comparisons: {stats['model_comparisons']}
-
-Explanation Method Performance:
------------------------------
-"""
-    for method in ["Grad-CAM", "Score-CAM", "Layer-CAM", "LIME", "SHAP"]:
-        success_rate = stats['successful_explanations'][method] / (stats['successful_explanations'][method] + stats['failed_explanations'][method]) * 100
-        final_report += f"{method}:\n"
-        final_report += f"  Successful: {stats['successful_explanations'][method]}\n"
-        final_report += f"  Failed: {stats['failed_explanations'][method]}\n"
-        final_report += f"  Success Rate: {success_rate:.2f}%\n\n"
-    
-    with open("output/final_report.txt", "w") as f:
-        f.write(final_report)
-    
-    logging.info("Processing completed. Final report saved to output/final_report.txt")
+    logging.info("All processing completed!")
 
 if __name__ == "__main__":
     main()

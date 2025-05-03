@@ -62,23 +62,6 @@ def preprocess_for_lime(image_pil):
         logging.error(f"Error in preprocess_for_lime: {str(e)}")
         raise
 
-# 供 SHAP 使用（输出 Tensor，无 batch 维）
-def preprocess_for_shap(image):
-    """
-    为SHAP预处理图像
-    """
-    if isinstance(image, np.ndarray):
-        image = Image.fromarray(image)
-    
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                           std=[0.229, 0.224, 0.225])
-    ])
-    
-    return transform(image).unsqueeze(0)
-
 def preprocess_for_model_comparison(image_pil):
     """
     为模型比较预处理图像

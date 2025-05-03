@@ -16,8 +16,15 @@ def save_heatmap_overlay(image, heatmap, save_path):
         # 确保输入图像是numpy数组
         if isinstance(image, torch.Tensor):
             image = image.cpu().numpy()
+            if image.shape[0] == 3:  # 如果是CHW格式
+                image = np.transpose(image, (1, 2, 0))
+        
+        # 确保图像是uint8类型
         if image.dtype != np.uint8:
-            image = (image * 255).astype(np.uint8)
+            if image.max() <= 1.0:
+                image = (image * 255).astype(np.uint8)
+            else:
+                image = image.astype(np.uint8)
         
         # 确保热力图是numpy数组
         if isinstance(heatmap, torch.Tensor):
@@ -32,11 +39,16 @@ def save_heatmap_overlay(image, heatmap, save_path):
         # 应用热力图颜色映射
         heatmap = cv2.applyColorMap(np.uint8(255 * heatmap), cv2.COLORMAP_JET)
         
+        # 确保图像是BGR格式
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
         # 叠加热力图到原始图像
         overlay = cv2.addWeighted(image, 0.6, heatmap, 0.4, 0)
         
         # 保存结果
-        cv2.imwrite(save_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(save_path, overlay)
+        logging.info(f"Heatmap overlay saved to: {save_path}")
         
     except Exception as e:
         logging.error(f"Error in save_heatmap_overlay: {str(e)}")
@@ -60,10 +72,19 @@ def plot_comparison(visualizations, titles, save_path=None):
         for i, (vis, title) in enumerate(zip(visualizations, titles)):
             if isinstance(vis, torch.Tensor):
                 vis = vis.cpu().numpy()
+                if vis.shape[0] == 3:  # 如果是CHW格式
+                    vis = np.transpose(vis, (1, 2, 0))
             
             # 确保图像格式正确
             if vis.dtype != np.uint8:
-                vis = (vis * 255).astype(np.uint8)
+                if vis.max() <= 1.0:
+                    vis = (vis * 255).astype(np.uint8)
+                else:
+                    vis = vis.astype(np.uint8)
+            
+            # 确保图像是RGB格式
+            if len(vis.shape) == 3 and vis.shape[2] == 3:
+                vis = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
             
             # 显示图像
             axes[i].imshow(vis)
