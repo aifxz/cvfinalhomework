@@ -1,96 +1,34 @@
-Overall Analysis Report
-=====================
+Explainer Comparison Report
+========================
 
-Model Comparison:
-----------------
-
-MobileNet:
-  average_entropy: 4.5084
-  average_sparsity: 0.5070
-  average_clarity: 0.0423
-  average_similarity: 0.9980
-  average_robustness: 0.9955
-
-ResNet50:
-  average_entropy: 4.5084
-  average_sparsity: 0.5070
-  average_clarity: 0.0423
-  average_similarity: 0.9980
-  average_robustness: 0.9955
-
-Explainer Comparison:
--------------------
+Performance Metrics:
+------------------
 
 Grad-CAM:
-  average_entropy: 4.5084
-  average_sparsity: 0.5070
-  average_clarity: 0.0423
-  average_similarity: 0.9980
-  average_robustness: 0.9955
-
-Layer-CAM:
-  average_entropy: 4.5084
-  average_sparsity: 0.5070
-  average_clarity: 0.0423
-  average_similarity: 0.9980
-  average_robustness: 0.9955
+  entropy: 15.2992 ¡À 0.2652
+  sparsity: 0.1328 ¡À 0.2069
+  clarity: 0.0032 ¡À 0.0007
+  similarity: 0.7344 ¡À 0.1811
+  robustness: 0.9729 ¡À 0.0164
 
 Score-CAM:
-  average_entropy: 4.5084
-  average_sparsity: 0.5070
-  average_clarity: 0.0423
-  average_similarity: 0.9980
-  average_robustness: 0.9955
+  entropy: 15.0877 ¡À 0.3702
+  sparsity: 0.2646 ¡À 0.2110
+  clarity: 0.0035 ¡À 0.0008
+  similarity: 0.6905 ¡À 0.1963
+  robustness: 0.9668 ¡À 0.0208
 
-Category Analysis:
-----------------
+Layer-CAM:
+  entropy: 15.3203 ¡À 0.2532
+  sparsity: 0.1192 ¡À 0.2062
+  clarity: 0.0031 ¡À 0.0007
+  similarity: 0.7211 ¡À 0.1862
+  robustness: 0.2381 ¡À 0.0343
 
-ship:
-  average_entropy: 4.5148
-  average_sparsity: 0.5271
-  average_clarity: 0.0404
-
-dog:
-  average_entropy: 4.5969
-  average_sparsity: 0.5079
-  average_clarity: 0.0431
-
-frog:
-  average_entropy: 4.4931
-  average_sparsity: 0.4478
-  average_clarity: 0.0455
-
-horse:
-  average_entropy: 4.5668
-  average_sparsity: 0.5132
-  average_clarity: 0.0434
-
-bird:
-  average_entropy: 4.3510
-  average_sparsity: 0.5174
-  average_clarity: 0.0388
-
-truck:
-  average_entropy: 4.6386
-  average_sparsity: 0.5214
-  average_clarity: 0.0437
-
-airplane:
-  average_entropy: 4.3283
-  average_sparsity: 0.5752
-  average_clarity: 0.0375
-
-cat:
-  average_entropy: 4.5482
-  average_sparsity: 0.5193
-  average_clarity: 0.0425
-
-deer:
-  average_entropy: 4.4049
-  average_sparsity: 0.4551
-  average_clarity: 0.0408
-
-automobile:
-  average_entropy: 4.5957
-  average_sparsity: 0.4968
-  average_clarity: 0.0456
+Interpretation:
+--------------
+1. Entropy: Higher values indicate more diverse attention distribution
+2. Sparsity: Higher values indicate more focused attention
+3. Clarity: Higher values indicate clearer and more distinct attention patterns
+4. Similarity: Higher values indicate more consistent explanations across different methods
+5. Robustness: Higher values indicate more stable explanations under noise
