@@ -1,0 +1,9 @@
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+pytorch-grad-cam
+shap
+lime
+opencv-python==4.11.0.86
+matplotlib==3.10.1
+Pillow==10.2.0
+numpy==1.26.4
