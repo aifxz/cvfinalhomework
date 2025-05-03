@@ -1,0 +1,28 @@
+
+Final Report
+============
+Date: 2025-05-03 22:22:28
+
+Dataset Statistics:
+-----------------
+Total Images Processed: 1000
+Training Images: 800
+Test Images: 200
+
+Explanation Method Performance:
+-----------------------------
+
+Grad-CAM:
+  Successful: 2000
+  Failed: 0
+  Success Rate: 100.00%
+
+Score-CAM:
+  Successful: 2000
+  Failed: 0
+  Success Rate: 100.00%
+
+Layer-CAM:
+  Successful: 2000
+  Failed: 0
+  Success Rate: 100.00%

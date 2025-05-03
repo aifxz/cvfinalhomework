@@ -1,54 +1,114 @@
-import numpy as np
 import torch
-from pytorch_grad_cam import ScoreCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image, preprocess_image
-import logging
+import torch.nn.functional as F
+import cv2
+import numpy as np
 import os
+import logging
+from torch import nn
 from utils.visualize import save_heatmap_overlay
 
-
-def run_score_cam(model, target_layer, input_image, rgb_image, use_cuda=True):
-    """
-    运行Score-CAM解释器
-    """
-    try:
-        model.eval()
-        device = torch.device("cuda" if (torch.cuda.is_available() and use_cuda) else "cpu")
-        model.to(device)
+class ScoreCAM:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.activations = None
         
-        logging.info(f"Running Score-CAM on device: {device}")
+        # 注册hook
+        target_layer.register_forward_hook(self.save_activation)
         
-        # 确保输入图像是numpy数组
-        if isinstance(rgb_image, torch.Tensor):
-            rgb_image = rgb_image.cpu().numpy()
-        if rgb_image.dtype != np.uint8:
-            rgb_image = (rgb_image * 255).astype(np.uint8)
+        # 确保模型在评估模式
+        self.model.eval()
         
-        # 预处理图像
-        input_tensor = preprocess_image(rgb_image).to(device)
-        logging.info(f"Input tensor shape: {input_tensor.shape}")
+    def save_activation(self, module, input, output):
+        self.activations = output.detach()
         
-        # 创建Score-CAM解释器
-        cam = ScoreCAM(model=model, target_layers=[target_layer])
-        logging.info("Score-CAM explainer created")
+    def generate_cam(self, input_tensor, target_class):
+        # 获取激活图
+        activations = self.activations
         
-        # 生成热力图
-        grayscale_cam = cam(input_tensor=input_tensor)[0]
-        logging.info(f"Score-CAM heatmap generated, shape: {grayscale_cam.shape}")
+        # 如果目标类别为None，使用模型预测的类别
+        if target_class is None:
+            with torch.no_grad():
+                output = self.model(input_tensor)
+                target_class = output.argmax(dim=1).item()
         
-        # 可视化结果
-        visualization = show_cam_on_image(rgb_image / 255.0, grayscale_cam, use_rgb=True)
-        logging.info("Score-CAM visualization created")
+        # 计算每个通道的重要性分数
+        b, c, h, w = activations.shape
+        scores = []
         
-        # 保存热力图叠加
-        output_dir = os.path.join("output", "visualizations", "score_cam")
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, "score_cam_heatmap.png")
-        save_heatmap_overlay(rgb_image, grayscale_cam, save_path)
-        logging.info(f"Score-CAM heatmap saved to: {save_path}")
+        for i in range(c):
+            # 创建掩码
+            mask = activations[:, i:i+1, :, :]
+            mask = F.interpolate(mask, size=input_tensor.shape[2:], mode='bilinear', align_corners=False)
+            mask = mask / (mask.max() + 1e-8)
+            
+            # 应用掩码
+            masked_input = input_tensor * mask
+            
+            # 前向传播
+            with torch.no_grad():
+                output = self.model(masked_input)
+                score = output[0, target_class].item()
+            
+            scores.append(score)
         
-        return visualization
+        # 将分数转换为权重
+        scores = torch.tensor(scores).to(activations.device)
+        weights = F.softmax(scores, dim=0)
         
-    except Exception as e:
-        logging.error(f"Error in Score-CAM: {str(e)}")
-        raise
+        # 计算CAM
+        cam = torch.sum(weights.view(-1, 1, 1, 1) * activations, dim=1, keepdim=True)
+        cam = F.relu(cam)  # 应用ReLU
+        
+        # 归一化
+        cam = cam - cam.min()
+        cam = cam / (cam.max() + 1e-8)
+        
+        return cam.squeeze().cpu().numpy()
+        
+    def explain(self, image, image_id, category, model_name, target_class=None):
+        try:
+            # 确保输入是tensor
+            if not isinstance(image, torch.Tensor):
+                image = torch.from_numpy(image).float()
+            
+            # 添加batch维度
+            if image.dim() == 3:
+                image = image.unsqueeze(0)
+            
+            # 移动到GPU（如果可用）
+            if torch.cuda.is_available():
+                image = image.cuda()
+                self.model = self.model.cuda()
+            
+            # 前向传播以获取激活
+            with torch.no_grad():
+                _ = self.model(image)
+            
+            # 生成CAM
+            cam = self.generate_cam(image, target_class)
+            
+            # 调整大小到原始图像尺寸
+            cam = cv2.resize(cam, (image.shape[3], image.shape[2]))
+            
+            # 保存热力图
+            save_dir = os.path.join("output/comparison_results", "train" if "train" in image_id else "test")
+            os.makedirs(save_dir, exist_ok=True)
+            
+            # 构建唯一的文件名
+            save_path = os.path.join(save_dir, f"{image_id}_{category}_{model_name}_Score-CAM.png")
+            
+            # 保存原始热力图数据
+            np.save(save_path.replace('.png', '_original.npy'), cam)
+            
+            # 保存可视化热力图
+            heatmap = np.uint8(255 * cam)
+            heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+            cv2.imwrite(save_path, heatmap)
+            
+            logging.info(f"Saved Score-CAM heatmap to {save_path}")
+            return cam
+            
+        except Exception as e:
+            logging.error(f"Error in Score-CAM explanation: {str(e)}")
+            raise

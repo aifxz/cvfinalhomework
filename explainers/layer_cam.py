@@ -1,53 +1,76 @@
-import numpy as np
 import torch
-from pytorch_grad_cam import LayerCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image, preprocess_image
-import logging
+import torch.nn.functional as F
+import cv2
+import numpy as np
 import os
+import logging
 from utils.visualize import save_heatmap_overlay
 
-def run_layer_cam(model, target_layer, input_image, rgb_image, use_cuda=True):
-    """
-    运行Layer-CAM解释器
-    """
-    try:
-        model.eval()
-        device = torch.device("cuda" if (torch.cuda.is_available() and use_cuda) else "cpu")
-        model.to(device)
+class LayerCAM:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients = None
+        self.activations = None
         
-        logging.info(f"Running Layer-CAM on device: {device}")
+        # 注册钩子
+        target_layer.register_forward_hook(self.save_activation)
+        target_layer.register_backward_hook(self.save_gradient)
+    
+    def save_activation(self, module, input, output):
+        self.activations = output
+    
+    def save_gradient(self, module, grad_input, grad_output):
+        self.gradients = grad_output[0]
+    
+    def generate_cam(self, input_tensor, target_class=None):
+        # 前向传播
+        output = self.model(input_tensor)
         
-        # 确保输入图像是numpy数组
-        if isinstance(rgb_image, torch.Tensor):
-            rgb_image = rgb_image.cpu().numpy()
-        if rgb_image.dtype != np.uint8:
-            rgb_image = (rgb_image * 255).astype(np.uint8)
+        if target_class is None:
+            target_class = output.argmax(dim=1).item()
         
-        # 预处理图像
-        input_tensor = preprocess_image(rgb_image).to(device)
-        logging.info(f"Input tensor shape: {input_tensor.shape}")
+        # 反向传播
+        self.model.zero_grad()
+        one_hot = torch.zeros_like(output)
+        one_hot[0][target_class] = 1
+        output.backward(gradient=one_hot, retain_graph=True)
         
-        # 创建Layer-CAM解释器
-        cam = LayerCAM(model=model, target_layers=[target_layer])
-        logging.info("Layer-CAM explainer created")
+        # 计算权重
+        weights = F.relu(self.gradients)
         
-        # 生成热力图
-        grayscale_cam = cam(input_tensor=input_tensor)[0]
-        logging.info(f"Layer-CAM heatmap generated, shape: {grayscale_cam.shape}")
+        # 计算CAM
+        cam = torch.sum(weights * self.activations, dim=1, keepdim=True)
+        cam = F.relu(cam)
         
-        # 可视化结果
-        visualization = show_cam_on_image(rgb_image / 255.0, grayscale_cam, use_rgb=True)
-        logging.info("Layer-CAM visualization created")
+        # 调整大小
+        cam = F.interpolate(cam, size=input_tensor.shape[2:], mode='bilinear', align_corners=False)
         
-        # 保存热力图叠加
-        output_dir = os.path.join("output", "visualizations", "layer_cam")
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, "layer_cam_heatmap.png")
-        save_heatmap_overlay(rgb_image, grayscale_cam, save_path)
-        logging.info(f"Layer-CAM heatmap saved to: {save_path}")
+        # 归一化
+        cam = cam - cam.min()
+        cam = cam / (cam.max() + 1e-8)
         
-        return visualization
-        
-    except Exception as e:
-        logging.error(f"Error in Layer-CAM: {str(e)}")
-        raise
+        return cam.squeeze().cpu().numpy()
+    
+    def explain(self, image, image_id, category, model_name, save_dir):
+        try:
+            # 生成CAM
+            cam = self.generate_cam(image)
+            
+            # 构建保存路径
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, f"{image_id}_{category}_{model_name}_Layer-CAM.png")
+            
+            # 保存热力图叠加图
+            save_heatmap_overlay(
+                image=image.squeeze().permute(1, 2, 0).cpu().numpy(),
+                heatmap=cam,
+                save_path=save_path,
+                save_original=True
+            )
+            
+            return cam
+            
+        except Exception as e:
+            logging.error(f"Error in Layer-CAM explanation: {str(e)}")
+            raise
