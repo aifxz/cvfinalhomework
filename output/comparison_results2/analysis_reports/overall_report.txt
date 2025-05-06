@@ -1,0 +1,81 @@
+Explainer Comparison Report
+========================
+
+Performance Metrics:
+------------------
++---------------+-----------------+-----------------+-----------------+-----------------+-----------------+
+| Explainer     | Entropy         | Sparsity        | Clarity         | Similarity      | Robustness      |
++===============+=================+=================+=================+=================+=================+
+| Grad-CAM      | 2.0277 ± 0.9639 | 0.4322 ± 0.1642 | 0.3715 ± 0.1337 | 0.3725 ± 0.1704 | 0.9829 ± 0.0147 |
++---------------+-----------------+-----------------+-----------------+-----------------+-----------------+
+| Layer-CAM     | 1.3058 ± 0.6514 | 0.6234 ± 0.1485 | 0.3351 ± 0.1696 | 0.2278 ± 0.1406 | 0.9717 ± 0.0235 |
++---------------+-----------------+-----------------+-----------------+-----------------+-----------------+
+| Occlusion     | 8.8779 ± 0.5848 | 0.4899 ± 0.1809 | 0.0237 ± 0.0067 | nan ± nan       | 0.9514 ± 0.0242 |
++---------------+-----------------+-----------------+-----------------+-----------------+-----------------+
+| RandomMasking | 8.2778 ± 3.2624 | 0.2433 ± 0.4062 | 0.0439 ± 0.0261 | nan ± nan       | 0.8634 ± 0.2346 |
++---------------+-----------------+-----------------+-----------------+-----------------+-----------------+
+
+Detailed Analysis:
+----------------
+
+ENTROPY Analysis:
+Best performing: Occlusion (8.8779)
+Worst performing: Layer-CAM (1.3058)
+Grad-CAM achieves 22.84% of Occlusion's performance
+Layer-CAM achieves 14.71% of Occlusion's performance
+RandomMasking achieves 93.24% of Occlusion's performance
+
+SPARSITY Analysis:
+Best performing: Layer-CAM (0.6234)
+Worst performing: RandomMasking (0.2433)
+Grad-CAM achieves 69.34% of Layer-CAM's performance
+Occlusion achieves 78.59% of Layer-CAM's performance
+RandomMasking achieves 39.03% of Layer-CAM's performance
+
+CLARITY Analysis:
+Best performing: Grad-CAM (0.3715)
+Worst performing: Occlusion (0.0237)
+Layer-CAM achieves 90.20% of Grad-CAM's performance
+Occlusion achieves 6.38% of Grad-CAM's performance
+RandomMasking achieves 11.82% of Grad-CAM's performance
+
+SIMILARITY Analysis:
+Best performing: Grad-CAM (0.3725)
+Worst performing: Layer-CAM (0.2278)
+Layer-CAM achieves 61.17% of Grad-CAM's performance
+Occlusion achieves nan% of Grad-CAM's performance
+RandomMasking achieves nan% of Grad-CAM's performance
+
+ROBUSTNESS Analysis:
+Best performing: Grad-CAM (0.9829)
+Worst performing: RandomMasking (0.8634)
+Layer-CAM achieves 98.87% of Grad-CAM's performance
+Occlusion achieves 96.80% of Grad-CAM's performance
+RandomMasking achieves 87.84% of Grad-CAM's performance
+
+
+Interpretation:
+--------------
+1. Entropy: Higher values indicate more diverse attention distribution
+2. Sparsity: Higher values indicate more focused attention
+3. Clarity: Higher values indicate clearer and more distinct attention patterns
+4. Similarity: Higher values indicate more consistent explanations across different methods
+5. Robustness: Higher values indicate more stable explanations under noise
+
+
+Key Findings:
+------------
+1. Performance Comparison:
+   - entropy: Occlusion performs best with 8.8779
+   - sparsity: Layer-CAM performs best with 0.6234
+   - clarity: Grad-CAM performs best with 0.3715
+   - similarity: Grad-CAM performs best with 0.3725
+   - robustness: Grad-CAM performs best with 0.9829
+
+2. Consistency Analysis:
+   - Grad-CAM shows 0.2894 average standard deviation across metrics
+   - Layer-CAM shows 0.2267 average standard deviation across metrics
+   - Occlusion shows nan average standard deviation across metrics
+   - RandomMasking shows nan average standard deviation across metrics
+
+注：灰色透明栏和*表示该方法在该指标下无有效输出（NaN），反映其在该维度下缺乏稳定可视解释能力。

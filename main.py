@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 from tqdm import tqdm
 import torch.nn.functional as F
+import gc
 
 # 导入预处理函数
 from utils.preprocess import preprocess_for_cam
@@ -229,7 +230,7 @@ def process_image_with_explainer(image, model, explainer_name, explainer_func, i
         logging.error(f"Error in process_image_with_explainer: {str(e)}")
         return None
 
-def compare_models(image_paths, models, explainers, output_dir, batch_size=128):
+def compare_models(image_paths, models, explainers, output_dir, batch_size=8):
     """批量比较不同模型在相同图片上的解释结果"""
     results = []
     total_images = len(image_paths)
@@ -241,100 +242,91 @@ def compare_models(image_paths, models, explainers, output_dir, batch_size=128):
     # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)
     
-    # 分批处理图片
-    for i in range(0, total_images, batch_size):
-        batch_paths = image_paths[i:i+batch_size]
-        logging.info(f"Processing batch {i//batch_size + 1}/{(total_images-1)//batch_size + 1} ({len(batch_paths)} images)")
-        
-        for image_path in batch_paths:
-            try:
-                # 加载图片
-                image = Image.open(image_path).convert('RGB')
-                image_name = os.path.basename(image_path)
-                image_id = os.path.splitext(image_name)[0]
-                category = os.path.basename(os.path.dirname(image_path))
-                
-                # 为每个模型生成解释
-                model_results = {}
-                for model_name, model in models.items():
-                    model_results[model_name] = {}
-                    
-                    # 使用不同的解释器
-                    for explainer_name, explainer in explainers.items():
-                        try:
-                            # 生成解释
-                            explanation = process_image_with_explainer(
-                                image, 
-                                model, 
-                                explainer_name, 
-                                explainer,
-                                image_id,
-                                category,
-                                model_name
-                            )
-                            
-                            if explanation:
-                                # 将PIL Image转换为numpy数组
-                                image_np = np.array(image)
-                                
-                                # 保存可视化结果
-                                save_path = os.path.join(
-                                    output_dir,
-                                    f"{image_id}_{model_name}_{explainer_name}.png"
-                                )
-                                save_heatmap_overlay(
-                                    image_np,
-                                    explanation['heatmap'],
-                                    save_path
-                                )
-                                # 新增：保存原始热力图为 .npy
-                                npy_save_path = os.path.join(
-                                    output_dir,
-                                    f"{image_id}_{model_name}_{explainer_name}_original.npy"
-                                )
-                                np.save(npy_save_path, explanation['heatmap'])
-                                # 新增：收集热力图用于后续拼接
-                                if 'all_heatmaps' not in locals():
-                                    all_heatmaps = {}
-                                all_heatmaps[explainer_name] = explanation['heatmap']
-                                # 新增：收集原图
-                                if 'orig_img' not in locals():
-                                    orig_img = image_np
-                                
-                                # 记录结果
-                                model_results[model_name][explainer_name] = {
-                                    'prediction': explanation['prediction'],
-                                    'confidence': explanation['confidence'],
-                                    'top_classes': explanation['top_classes']
-                                }
-                            
-                            completed_explanations += 1
-                            if completed_explanations % 10 == 0:
-                                progress = (completed_explanations / total_explanations) * 100
-                                eta = (time.time() - start_time) * (total_explanations - completed_explanations) / completed_explanations
-                                logging.info(f"Progress: {progress:.1f}% ({completed_explanations}/{total_explanations}), ETA: {eta/3600:.1f} hours")
-                                
-                        except Exception as e:
-                            logging.error(f"Error processing {image_name} with {model_name} and {explainer_name}: {str(e)}")
-                            continue
-                
-                # 记录所有模型的结果
-                results.append({
-                    'image': image_name,
-                    'results': model_results
-                })
-                
-            except Exception as e:
-                logging.error(f"Error processing {image_path}: {str(e)}")
+    # 自动降级 batch_size
+    orig_batch_size = batch_size
+    while True:
+        try:
+            # 分批处理图片
+            for i in range(0, total_images, batch_size):
+                batch_paths = image_paths[i:i+batch_size]
+                logging.info(f"Processing batch {i//batch_size + 1}/{(total_images-1)//batch_size + 1} ({len(batch_paths)} images)")
+                # tqdm 外层：图片进度
+                for image_path in tqdm(batch_paths, desc=f"Images {i+1}-{i+len(batch_paths)}/{total_images}", position=0, leave=True):
+                    try:
+                        # 加载图片
+                        image = Image.open(image_path).convert('RGB')
+                        image_name = os.path.basename(image_path)
+                        image_id = os.path.splitext(image_name)[0]
+                        category = os.path.basename(os.path.dirname(image_path))
+                        # tqdm 内层：模型/解释器组合进度
+                        model_results = {}
+                        for model_name, model in models.items():
+                            model_results[model_name] = {}
+                            for explainer_name, explainer in tqdm(explainers.items(), desc=f"{image_name} Explainers", position=1, leave=False):
+                                try:
+                                    explanation = process_image_with_explainer(
+                                        image, 
+                                        model, 
+                                        explainer_name, 
+                                        explainer,
+                                        image_id,
+                                        category,
+                                        model_name
+                                    )
+                                    if (explanation is None or
+                                        ('heatmap' in explanation and np.all(explanation['heatmap'] == 0))):
+                                        continue
+                                    image_np = np.array(image)
+                                    save_path = os.path.join(
+                                        output_dir,
+                                        f"{image_id}_{model_name}_{explainer_name}.png"
+                                    )
+                                    save_heatmap_overlay(
+                                        image_np,
+                                        explanation['heatmap'],
+                                        save_path
+                                    )
+                                    npy_save_path = os.path.join(
+                                        output_dir,
+                                        f"{image_id}_{model_name}_{explainer_name}_original.npy"
+                                    )
+                                    np.save(npy_save_path, explanation['heatmap'])
+                                    if 'all_heatmaps' not in locals():
+                                        all_heatmaps = {}
+                                    all_heatmaps[explainer_name] = explanation['heatmap']
+                                    if 'orig_img' not in locals():
+                                        orig_img = image_np
+                                    model_results[model_name][explainer_name] = {
+                                        'prediction': explanation['prediction'],
+                                        'confidence': explanation['confidence'],
+                                        'top_classes': explanation['top_classes']
+                                    }
+                                except Exception as e:
+                                    logging.error(f"Error processing {image_name} with {model_name} and {explainer_name}: {str(e)}")
+                                    continue
+                        results.append({
+                            'image': image_name,
+                            'results': model_results
+                        })
+                    except Exception as e:
+                        logging.error(f"Error processing {image_path}: {str(e)}")
+                        continue
+                    processed_images += 1
+                    # tqdm 会自动显示进度和剩余时间
+                    torch.cuda.empty_cache()
+                    gc.collect()
+            save_comparison_report(results, os.path.join(output_dir, 'comparison_report2.txt'))
+            return results
+        except RuntimeError as e:
+            if 'out of memory' in str(e).lower() and batch_size > 1:
+                logging.warning(f"OOM detected, reducing batch_size from {batch_size} to {batch_size//2}")
+                batch_size = max(1, batch_size // 2)
+                torch.cuda.empty_cache()
+                gc.collect()
                 continue
-            
-            processed_images += 1
-            if processed_images % 10 == 0:
-                logging.info(f"Processed {processed_images}/{total_images} images")
-    
-    # 保存比较结果
-    save_comparison_report(results, os.path.join(output_dir, 'comparison_report2.txt'))
-    return results
+            else:
+                raise
+        break
 
 def save_comparison_report(results, output_path):
     """
@@ -491,7 +483,7 @@ def get_image_paths(train_dir, test_dir, num_samples=1000):
 def main():
     parser = argparse.ArgumentParser(description='Generate explanations for models')
     parser.add_argument('--num_samples', type=int, default=1000, help='Number of samples to explain')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for processing')
+    parser.add_argument('--batch_size', type=int, default=8, help='Batch size for processing')
     args = parser.parse_args()
 
     try:
