@@ -3,27 +3,49 @@ Explainer Comparison Report
 
 Performance Metrics:
 ------------------
++-------------+------------------+-----------------+-----------------+-----------------+-----------------+
+| Explainer   | Entropy          | Sparsity        | Clarity         | Similarity      | Robustness      |
++=============+==================+=================+=================+=================+=================+
+| Grad-CAM    | 10.0000 ¡À 0.0000 | 0.0000 ¡À 0.0000 | 0.0000 ¡À 0.0000 | 0.5000 ¡À 0.5000 | 0.9950 ¡À 0.0002 |
++-------------+------------------+-----------------+-----------------+-----------------+-----------------+
+| Score-CAM   | 0.0000 ¡À 0.0000  | 1.0000 ¡À 0.0000 | 0.0000 ¡À 0.0000 | 0.0000 ¡À 0.0000 | 0.0000 ¡À 0.0000 |
++-------------+------------------+-----------------+-----------------+-----------------+-----------------+
+| Layer-CAM   | 10.0000 ¡À 0.0000 | 0.0000 ¡À 0.0000 | 0.0000 ¡À 0.0000 | 0.5000 ¡À 0.5000 | 0.9950 ¡À 0.0002 |
++-------------+------------------+-----------------+-----------------+-----------------+-----------------+
 
-Grad-CAM:
-  entropy: 15.2992 ¡À 0.2652
-  sparsity: 0.1328 ¡À 0.2069
-  clarity: 0.0032 ¡À 0.0007
-  similarity: 0.7344 ¡À 0.1811
-  robustness: 0.9729 ¡À 0.0164
+Detailed Analysis:
+----------------
 
-Score-CAM:
-  entropy: 15.0877 ¡À 0.3702
-  sparsity: 0.2646 ¡À 0.2110
-  clarity: 0.0035 ¡À 0.0008
-  similarity: 0.6905 ¡À 0.1963
-  robustness: 0.9668 ¡À 0.0208
+ENTROPY Analysis:
+Best performing: Grad-CAM (10.0000)
+Worst performing: Score-CAM (0.0000)
+Score-CAM achieves 0.00% of Grad-CAM's performance
+Layer-CAM achieves 100.00% of Grad-CAM's performance
 
-Layer-CAM:
-  entropy: 15.3203 ¡À 0.2532
-  sparsity: 0.1192 ¡À 0.2062
-  clarity: 0.0031 ¡À 0.0007
-  similarity: 0.7211 ¡À 0.1862
-  robustness: 0.2381 ¡À 0.0343
+SPARSITY Analysis:
+Best performing: Score-CAM (1.0000)
+Worst performing: Grad-CAM (0.0000)
+Grad-CAM achieves 0.00% of Score-CAM's performance
+Layer-CAM achieves 0.00% of Score-CAM's performance
+
+CLARITY Analysis:
+Best performing: Grad-CAM (0.0000)
+Worst performing: Score-CAM (0.0000)
+Score-CAM achieves 0.00% of Grad-CAM's performance
+Layer-CAM achieves 0.00% of Grad-CAM's performance
+
+SIMILARITY Analysis:
+Best performing: Grad-CAM (0.5000)
+Worst performing: Score-CAM (0.0000)
+Score-CAM achieves 0.00% of Grad-CAM's performance
+Layer-CAM achieves 100.00% of Grad-CAM's performance
+
+ROBUSTNESS Analysis:
+Best performing: Grad-CAM (0.9950)
+Worst performing: Score-CAM (0.0000)
+Score-CAM achieves 0.00% of Grad-CAM's performance
+Layer-CAM achieves 100.00% of Grad-CAM's performance
+
 
 Interpretation:
 --------------
@@ -32,3 +54,18 @@ Interpretation:
 3. Clarity: Higher values indicate clearer and more distinct attention patterns
 4. Similarity: Higher values indicate more consistent explanations across different methods
 5. Robustness: Higher values indicate more stable explanations under noise
+
+
+Key Findings:
+------------
+1. Performance Comparison:
+   - entropy: Grad-CAM performs best with 10.0000
+   - sparsity: Score-CAM performs best with 1.0000
+   - clarity: Grad-CAM performs best with 0.0000
+   - similarity: Grad-CAM performs best with 0.5000
+   - robustness: Grad-CAM performs best with 0.9950
+
+2. Consistency Analysis:
+   - Grad-CAM shows 0.1000 average standard deviation across metrics
+   - Score-CAM shows 0.0000 average standard deviation across metrics
+   - Layer-CAM shows 0.1000 average standard deviation across metrics

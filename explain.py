@@ -6,6 +6,7 @@ from torchvision import datasets, transforms
 import os
 import logging
 from tqdm import tqdm
+import time
 from models.resnet import ResNet50
 from models.mobilenet import MobileNetV2
 from explainers.grad_cam import GradCAM
@@ -40,8 +41,8 @@ def get_target_layer(model, model_name):
 
 def main():
     parser = argparse.ArgumentParser(description='Generate explanations for models')
-    parser.add_argument('--num_samples', type=int, default=50, help='Number of samples to explain')
-    parser.add_argument('--batch_size', type=int, default=8, help='Batch size for processing')
+    parser.add_argument('--num_samples', type=int, default=1000, help='Number of samples to explain')
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch size for processing')
     args = parser.parse_args()
 
     # 设置日志
@@ -75,38 +76,102 @@ def main():
         'Score-CAM': ScoreCAM,
         'Layer-CAM': LayerCAM
     }
-
-    # 为每个模型和解释器生成解释
+    
+    # 初始化性能统计
+    performance_stats = {
+        model_name: {
+            explainer_name: {
+                'total_time': 0,
+                'avg_time_per_image': 0,
+                'memory_usage': 0
+            } for explainer_name in explainers.keys()
+        } for model_name in ['ResNet50', 'MobileNetV2']
+    }
+    
+    # 对每个模型和解释器组合进行处理
     for model_name in ['ResNet50', 'MobileNetV2']:
         print(f"\nGenerating explanations for {model_name}...")
         model = load_model(model_name, device)
-        target_layer = get_target_layer(model, model_name)
-
-        for explainer_name, ExplainerClass in explainers.items():
-            print(f"Using {explainer_name}...")
-            explainer = ExplainerClass(model, target_layer)
-
-            # 使用tqdm显示进度
+        
+        for explainer_name, explainer_class in explainers.items():
+            print(f"\nUsing {explainer_name}...")
+            start_time = time.time()
+            
+            # 获取目标层
+            if model_name == 'ResNet50':
+                target_layer = model.layer4[-1].conv2
+            else:  # MobileNetV2
+                target_layer = model.features[-1].conv[0]
+            
+            # 创建解释器实例
+            explainer = explainer_class(model, target_layer)
+            
+            # 处理每个批次
             for batch_idx, (images, labels) in enumerate(tqdm(train_loader, desc=f"Processing {explainer_name}")):
-                images = images.to(device)
-                labels = labels.to(device)
-                
-                for idx, (image, label) in enumerate(zip(images, labels)):
-                    image = image.unsqueeze(0)  # 添加batch维度
-                    image_id = f"train_{batch_idx * args.batch_size + idx}"
-                    category = train_dataset.dataset.classes[label.item()]
+                for i in range(len(images)):
+                    image = images[i].unsqueeze(0)
+                    label = labels[i].item()
                     
+                    # 生成解释
                     try:
-                        explainer.explain(
-                            image=image,
-                            image_id=image_id,
-                            category=category,
-                            model_name=model_name,
-                            target_class=label.item()
+                        cam = explainer.explain(
+                            image,
+                            f"train_{batch_idx * args.batch_size + i}",
+                            train_dataset.dataset.classes[label],
+                            model_name
                         )
                     except Exception as e:
-                        logging.error(f"Error processing image {image_id} with {explainer_name}: {str(e)}")
+                        logging.error(f"Error processing image {batch_idx * args.batch_size + i} with {explainer_name}: {str(e)}")
                         continue
+            
+            # 计算性能统计
+            end_time = time.time()
+            total_time = end_time - start_time
+            avg_time_per_image = total_time / len(train_dataset)
+            
+            performance_stats[model_name][explainer_name]['total_time'] = total_time
+            performance_stats[model_name][explainer_name]['avg_time_per_image'] = avg_time_per_image
+            
+            # 记录GPU内存使用（如果可用）
+            if torch.cuda.is_available():
+                memory_allocated = torch.cuda.max_memory_allocated() / 1024**2  # MB
+                performance_stats[model_name][explainer_name]['memory_usage'] = memory_allocated
+                torch.cuda.reset_peak_memory_stats()
+            
+            print(f"Completed {explainer_name} in {total_time:.2f} seconds")
+            print(f"Average time per image: {avg_time_per_image:.2f} seconds")
+            if torch.cuda.is_available():
+                print(f"Peak GPU memory usage: {memory_allocated:.2f} MB")
+    
+    # 生成性能报告
+    performance_report_path = os.path.join("output/comparison_results/analysis_reports", "performance_report.txt")
+    os.makedirs(os.path.dirname(performance_report_path), exist_ok=True)
+    
+    with open(performance_report_path, 'w') as f:
+        f.write("Performance Comparison Report\n")
+        f.write("==========================\n\n")
+        
+        for model_name in ['ResNet50', 'MobileNetV2']:
+            f.write(f"\n{model_name}:\n")
+            f.write("----------------\n")
+            
+            for explainer_name in explainers.keys():
+                stats = performance_stats[model_name][explainer_name]
+                f.write(f"\n{explainer_name}:\n")
+                f.write(f"  Total processing time: {stats['total_time']:.2f} seconds\n")
+                f.write(f"  Average time per image: {stats['avg_time_per_image']:.2f} seconds\n")
+                if torch.cuda.is_available():
+                    f.write(f"  Peak GPU memory usage: {stats['memory_usage']:.2f} MB\n")
+            
+            f.write("\nPerformance Comparison:\n")
+            f.write("----------------------\n")
+            
+            # 计算相对性能
+            fastest_time = min(stats['total_time'] for stats in performance_stats[model_name].values())
+            for explainer_name in explainers.keys():
+                stats = performance_stats[model_name][explainer_name]
+                relative_speed = fastest_time / stats['total_time']
+                f.write(f"{explainer_name} is {relative_speed:.2f}x {'faster' if relative_speed > 1 else 'slower'} than the fastest method\n")
 
 if __name__ == "__main__":
     main() 
